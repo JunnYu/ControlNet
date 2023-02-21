@@ -53,7 +53,7 @@ class FrozenCLIPEmbedder(AbstractEncoder):
         "hidden",
         "penultimate",
     ]
-    def __init__(self, version="laion/CLIP-ViT-H-14-laion2B-s32B-b79K", max_length=77,
+    def __init__(self, version="openai/clip-vit-large-patch14", max_length=77,
                  freeze=True, layer="last", layer_idx=None, 
                  from_hf_hub = False,
                  cache_dir=None,

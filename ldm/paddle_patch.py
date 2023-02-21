@@ -396,7 +396,7 @@ paddle.scatter_paddle = scatter_paddle
 paddle.Tensor.scatter_paddle = scatter_paddle
 
 
-def gather_paddle(tensor, dim, index):
+def gather_torch(tensor, dim, index):
     return paddle.take_along_axis(tensor, index, dim)
 
 @patch_to(nn.Layer)
@@ -407,8 +407,8 @@ def eval(self):
         layer.training = False
     return self
 
-paddle.gather_paddle = gather_paddle
-paddle.Tensor.gather_paddle = gather_paddle
+paddle.gather_torch = gather_torch
+paddle.Tensor.gather_torch = gather_torch
 
 
 @patch_to(nn.Layer)
