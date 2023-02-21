@@ -2,9 +2,9 @@ from abc import abstractmethod
 import math
 
 import numpy as np
-import torch as th
-import torch.nn as nn
-import torch.nn.functional as F
+import paddle as th
+import paddle.nn as nn
+import paddle.nn.functional as F
 
 from ldm.modules.diffusionmodules.util import (
     checkpoint,
@@ -50,7 +50,7 @@ class AttentionPool2d(nn.Module):
     def forward(self, x):
         b, c, *_spatial = x.shape
         x = x.reshape(b, c, -1)  # NC(HW)
-        x = th.cat([x.mean(dim=-1, keepdim=True), x], dim=-1)  # NC(HW+1)
+        x = th.cat([x.mean(-1, keepdim=True), x], dim=-1)  # NC(HW+1)
         x = x + self.positional_embedding[None, :, :].to(x.dtype)  # NC(HW+1)
         x = self.qkv_proj(x)
         x = self.attention(x)
@@ -265,7 +265,7 @@ class ResBlock(TimestepBlock):
             emb_out = emb_out[..., None]
         if self.use_scale_shift_norm:
             out_norm, out_rest = self.out_layers[0], self.out_layers[1:]
-            scale, shift = th.chunk(emb_out, 2, dim=1)
+            scale, shift = th.chunk(emb_out, 2, axis=1)
             h = out_norm(h) * (1 + scale) + shift
             h = out_rest(h)
         else:
@@ -361,12 +361,12 @@ class QKVAttentionLegacy(nn.Module):
         bs, width, length = qkv.shape
         assert width % (3 * self.n_heads) == 0
         ch = width // (3 * self.n_heads)
-        q, k, v = qkv.reshape(bs * self.n_heads, ch * 3, length).split(ch, dim=1)
+        q, k, v = qkv.reshape(bs * self.n_heads, ch * 3, length).chunk(ch, axis=1)
         scale = 1 / math.sqrt(math.sqrt(ch))
         weight = th.einsum(
             "bct,bcs->bts", q * scale, k * scale
         )  # More stable with f16 than dividing afterwards
-        weight = th.softmax(weight.float(), dim=-1).type(weight.dtype)
+        weight = th.softmax(weight.float(), -1).cast(weight.dtype)
         a = th.einsum("bts,bcs->bct", weight, v)
         return a.reshape(bs, -1, length)
 
@@ -393,14 +393,14 @@ class QKVAttention(nn.Module):
         bs, width, length = qkv.shape
         assert width % (3 * self.n_heads) == 0
         ch = width // (3 * self.n_heads)
-        q, k, v = qkv.chunk(3, dim=1)
+        q, k, v = qkv.chunk(3, axis=1)
         scale = 1 / math.sqrt(math.sqrt(ch))
         weight = th.einsum(
             "bct,bcs->bts",
             (q * scale).view(bs * self.n_heads, ch, length),
             (k * scale).view(bs * self.n_heads, ch, length),
         )  # More stable with f16 than dividing afterwards
-        weight = th.softmax(weight.float(), dim=-1).type(weight.dtype)
+        weight = th.softmax(weight.float(), axis=-1).cast(weight.dtype)
         a = th.einsum("bts,bcs->bct", weight, v.reshape(bs * self.n_heads, ch, length))
         return a.reshape(bs, -1, length)
 
@@ -469,8 +469,11 @@ class UNetModel(nn.Module):
         num_attention_blocks=None,
         disable_middle_self_attn=False,
         use_linear_in_transformer=False,
+        **kwargs
     ):
         super().__init__()
+        # dont use_checkpoint
+        self.use_checkpoint = use_checkpoint = False
         if use_spatial_transformer:
             assert context_dim is not None, 'Fool!! You forgot to include the dimension of your cross-attention conditioning...'
 
@@ -517,7 +520,8 @@ class UNetModel(nn.Module):
         self.conv_resample = conv_resample
         self.num_classes = num_classes
         self.use_checkpoint = use_checkpoint
-        self.dtype = th.float16 if use_fp16 else th.float32
+        # self.dtype = th.float16 if use_fp16 else th.float32
+        # self.dtype = th.bfloat16 if use_bf16 else self.dtype
         self.num_heads = num_heads
         self.num_head_channels = num_head_channels
         self.num_heads_upsample = num_heads_upsample
@@ -535,7 +539,7 @@ class UNetModel(nn.Module):
                 self.label_emb = nn.Embedding(num_classes, time_embed_dim)
             elif self.num_classes == "continuous":
                 print("setting up linear c_adm embedding layer")
-                self.label_emb = nn.Linear(1, time_embed_dim)
+                self.label_emb = nn.LinearPT(1, time_embed_dim)
             else:
                 raise ValueError()
 
@@ -732,7 +736,7 @@ class UNetModel(nn.Module):
             self.id_predictor = nn.Sequential(
             normalization(ch),
             conv_nd(dims, model_channels, n_embed, 1),
-            #nn.LogSoftmax(dim=1)  # change to cross_entropy and produce non-normalized logits
+            #nn.LogSoftmax(axis=1)  # change to cross_entropy and produce non-normalized logits
         )
 
     def convert_to_fp16(self):
@@ -779,7 +783,7 @@ class UNetModel(nn.Module):
         for module in self.output_blocks:
             h = th.cat([h, hs.pop()], dim=1)
             h = module(h, emb, context)
-        h = h.type(x.dtype)
+        h = h.cast(x.dtype)
         if self.predict_codebook_ids:
             return self.id_predictor(h)
         else:

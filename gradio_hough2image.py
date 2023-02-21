@@ -5,10 +5,10 @@ import cv2
 import einops
 import gradio as gr
 import numpy as np
-import torch
+import paddle
 import random
 
-from pytorch_lightning import seed_everything
+from paddlenlp.trainer import set_seed as seed_everything
 from annotator.util import resize_image, HWC3
 from annotator.mlsd import MLSDdetector
 from cldm.model import create_model, load_state_dict
@@ -24,7 +24,7 @@ ddim_sampler = DDIMSampler(model)
 
 
 def process(input_image, prompt, a_prompt, n_prompt, num_samples, image_resolution, detect_resolution, ddim_steps, guess_mode, strength, scale, seed, eta, value_threshold, distance_threshold):
-    with torch.no_grad():
+    with paddle.no_grad():
         input_image = HWC3(input_image)
         detected_map = apply_mlsd(resize_image(input_image, detect_resolution), value_threshold, distance_threshold)
         detected_map = HWC3(detected_map)
@@ -33,8 +33,8 @@ def process(input_image, prompt, a_prompt, n_prompt, num_samples, image_resoluti
 
         detected_map = cv2.resize(detected_map, (W, H), interpolation=cv2.INTER_NEAREST)
 
-        control = torch.from_numpy(detected_map.copy()).float().cuda() / 255.0
-        control = torch.stack([control for _ in range(num_samples)], dim=0)
+        control = paddle.to_tensor(detected_map.copy()).float().cuda() / 255.0
+        control = paddle.stack([control for _ in range(num_samples)], dim=0)
         control = einops.rearrange(control, 'b h w c -> b c h w').clone()
 
         if seed == -1:
@@ -97,4 +97,4 @@ with block:
     run_button.click(fn=process, inputs=ips, outputs=[result_gallery])
 
 
-block.launch(server_name='0.0.0.0')
+block.launch(server_name='0.0.0.0', server_port=8221)

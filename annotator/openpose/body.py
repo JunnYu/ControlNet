@@ -5,19 +5,19 @@ import time
 from scipy.ndimage.filters import gaussian_filter
 import matplotlib.pyplot as plt
 import matplotlib
-import torch
-from torchvision import transforms
+import paddle
+from paddle.vision import transforms
 
 from . import util
 from .model import bodypose_model
-
+from cldm.model import load
 class Body(object):
     def __init__(self, model_path):
         self.model = bodypose_model()
-        if torch.cuda.is_available():
-            self.model = self.model.cuda()
-            print('cuda')
-        model_dict = util.transfer(self.model, torch.load(model_path))
+        # if paddle.cuda.is_available():
+        #     self.model = self.model.cuda()
+        #     print('cuda')
+        model_dict = util.transfer(self.model, load(model_path))
         self.model.load_state_dict(model_dict)
         self.model.eval()
 
@@ -40,11 +40,11 @@ class Body(object):
             im = np.transpose(np.float32(imageToTest_padded[:, :, :, np.newaxis]), (3, 2, 0, 1)) / 256 - 0.5
             im = np.ascontiguousarray(im)
 
-            data = torch.from_numpy(im).float()
-            if torch.cuda.is_available():
-                data = data.cuda()
+            data = paddle.to_tensor(im).float()
+            # if paddle.cuda.is_available():
+            #     data = data.cuda()
             # data = data.permute([2, 0, 1]).unsqueeze(0).float()
-            with torch.no_grad():
+            with paddle.no_grad():
                 Mconv7_stage6_L1, Mconv7_stage6_L2 = self.model(data)
             Mconv7_stage6_L1 = Mconv7_stage6_L1.cpu().numpy()
             Mconv7_stage6_L2 = Mconv7_stage6_L2.cpu().numpy()

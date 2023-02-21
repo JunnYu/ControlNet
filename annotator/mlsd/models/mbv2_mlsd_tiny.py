@@ -1,10 +1,9 @@
-import os
-import sys
-import torch
-import torch.nn as nn
-import torch.utils.model_zoo as model_zoo
-from  torch.nn import  functional as F
 
+import paddle
+import paddle.nn as nn
+from  paddle.nn import  functional as F
+from paddlenlp.utils.initializer import kaiming_normal_, normal_, zeros_, ones_
+from cldm.model import load
 
 class BlockTypeA(nn.Module):
     def __init__(self, in_c1, in_c2, out_c1, out_c2, upscale = True):
@@ -12,12 +11,12 @@ class BlockTypeA(nn.Module):
         self.conv1 = nn.Sequential(
             nn.Conv2d(in_c2, out_c2, kernel_size=1),
             nn.BatchNorm2d(out_c2),
-            nn.ReLU(inplace=True)
+            nn.ReLU()
         )
         self.conv2 = nn.Sequential(
             nn.Conv2d(in_c1, out_c1, kernel_size=1),
             nn.BatchNorm2d(out_c1),
-            nn.ReLU(inplace=True)
+            nn.ReLU()
         )
         self.upscale = upscale
 
@@ -25,7 +24,7 @@ class BlockTypeA(nn.Module):
         b = self.conv1(b)
         a = self.conv2(a)
         b = F.interpolate(b, scale_factor=2.0, mode='bilinear', align_corners=True)
-        return torch.cat((a, b), dim=1)
+        return paddle.cat((a, b), dim=1)
 
 
 class BlockTypeB(nn.Module):
@@ -94,7 +93,7 @@ class ConvBNReLU(nn.Sequential):
         self.stride = stride
         #padding = (kernel_size - 1) // 2
 
-        # TFLite uses slightly different padding than PyTorch
+        # TFLite uses slightly different padding than Pypaddle
         if stride == 2:
             padding = 0
         else:
@@ -103,7 +102,7 @@ class ConvBNReLU(nn.Sequential):
         super(ConvBNReLU, self).__init__(
             nn.Conv2d(in_planes, out_planes, kernel_size, stride, padding, groups=groups, bias=False),
             nn.BatchNorm2d(out_planes),
-            nn.ReLU6(inplace=True)
+            nn.ReLU6()
         )
         self.max_pool = nn.MaxPool2d(kernel_size=stride, stride=stride)
 
@@ -202,21 +201,21 @@ class MobileNetV2(nn.Module):
         # weight initialization
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out')
+                kaiming_normal_(m.weight, mode='fan_out')
                 if m.bias is not None:
-                    nn.init.zeros_(m.bias)
+                    zeros_(m.bias)
             elif isinstance(m, nn.BatchNorm2d):
-                nn.init.ones_(m.weight)
-                nn.init.zeros_(m.bias)
+                ones_(m.weight)
+                zeros_(m.bias)
             elif isinstance(m, nn.Linear):
-                nn.init.normal_(m.weight, 0, 0.01)
-                nn.init.zeros_(m.bias)
+                normal_(m.weight, 0, 0.01)
+                zeros_(m.bias)
 
         #if pretrained:
         #    self._load_pretrained_model()
 
     def _forward_impl(self, x):
-        # This exists since TorchScript doesn't support inheritance, so the superclass method
+        # This exists since paddleScript doesn't support inheritance, so the superclass method
         # (this one) needs to have a name other than `forward` that can be accessed in a subclass
         fpn_features = []
         for i, f in enumerate(self.features):
@@ -234,7 +233,11 @@ class MobileNetV2(nn.Module):
         return self._forward_impl(x)
 
     def _load_pretrained_model(self):
-        pretrain_dict = model_zoo.load_url('https://download.pytorch.org/models/mobilenet_v2-b0353104.pth')
+        from paddlenlp.utils.env import MODEL_HOME
+        from paddlenlp.utils.downloader import get_path_from_url_with_filelock
+        url = 'https://download.pypaddle.org/models/mobilenet_v2-b0353104.pth'
+        file = get_path_from_url_with_filelock(url, MODEL_HOME)
+        pretrain_dict = load(file)
         model_dict = {}
         state_dict = self.state_dict()
         for k, v in pretrain_dict.items():

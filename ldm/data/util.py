@@ -1,4 +1,4 @@
-import torch
+import paddle
 
 from ldm.modules.midas.api import load_midas_transform
 
@@ -13,7 +13,7 @@ class AddMiDaS(object):
         return x
 
     def np2pt(self, x):
-        x = torch.from_numpy(x) * 2 - 1.
+        x = paddle.to_tensor(x) * 2 - 1.
         return x
 
     def __call__(self, sample):

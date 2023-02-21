@@ -10,7 +10,7 @@ assert os.path.exists(input_path), 'Input model does not exist.'
 assert not os.path.exists(output_path), 'Output filename already exists.'
 assert os.path.exists(os.path.dirname(output_path)), 'Output path is not valid.'
 
-import torch
+import paddle
 from share import *
 from cldm.model import create_model
 
@@ -26,7 +26,7 @@ def get_node_name(name, parent_name):
 
 model = create_model(config_path='./models/cldm_v21.yaml')
 
-pretrained_weights = torch.load(input_path)
+pretrained_weights = paddle.load(input_path)
 if 'state_dict' in pretrained_weights:
     pretrained_weights = pretrained_weights['state_dict']
 
@@ -46,5 +46,5 @@ for k in scratch_dict.keys():
         print(f'These weights are newly added: {k}')
 
 model.load_state_dict(target_dict, strict=True)
-torch.save(model.state_dict(), output_path)
+paddle.save(model.state_dict(), output_path)
 print('Done.')

@@ -1,6 +1,6 @@
 '''
 modified by  lihaoweicv
-pytorch version
+pypaddle version
 '''
 
 '''
@@ -12,8 +12,8 @@ Apache License v2.0
 import os
 import numpy as np
 import cv2
-import torch
-from  torch.nn import  functional as F
+import paddle
+from  paddle.nn import  functional as F
 
 
 def deccode_output_score_and_ptss(tpMap, topk_n = 200, ksize = 5):
@@ -26,16 +26,16 @@ def deccode_output_score_and_ptss(tpMap, topk_n = 200, ksize = 5):
     assert  b==1, 'only support bsize==1'
     displacement = tpMap[:, 1:5, :, :][0]
     center = tpMap[:, 0, :, :]
-    heat = torch.sigmoid(center)
+    heat = paddle.sigmoid(center)
     hmax = F.max_pool2d( heat, (ksize, ksize), stride=1, padding=(ksize-1)//2)
     keep = (hmax == heat).float()
     heat = heat * keep
     heat = heat.reshape(-1, )
 
-    scores, indices = torch.topk(heat, topk_n, dim=-1, largest=True)
-    yy = torch.floor_divide(indices, w).unsqueeze(-1)
-    xx = torch.fmod(indices, w).unsqueeze(-1)
-    ptss = torch.cat((yy, xx),dim=-1)
+    scores, indices = paddle.topk(heat, topk_n, dim=-1, largest=True)
+    yy = paddle.floor_divide(indices, w).unsqueeze(-1)
+    xx = paddle.fmod(indices, w).unsqueeze(-1)
+    ptss = paddle.cat((yy, xx),dim=-1)
 
     ptss   = ptss.detach().cpu().numpy()
     scores = scores.detach().cpu().numpy()
@@ -58,7 +58,7 @@ def pred_lines(image, model,
     batch_image = np.expand_dims(resized_image, axis=0).astype('float32')
     batch_image = (batch_image / 127.5) - 1.0
 
-    batch_image = torch.from_numpy(batch_image).float().cuda()
+    batch_image = paddle.to_tensor(batch_image).float().cuda()
     outputs = model(batch_image)
     pts, pts_score, vmap = deccode_output_score_and_ptss(outputs, 200, 3)
     start = vmap[:, :, :2]
@@ -109,7 +109,7 @@ def pred_squares(image,
     batch_image = np.expand_dims(resized_image, axis=0).astype('float32')
     batch_image = (batch_image / 127.5) - 1.0
 
-    batch_image = torch.from_numpy(batch_image).float().cuda()
+    batch_image = paddle.to_tensor(batch_image).float().cuda()
     outputs = model(batch_image)
 
     pts, pts_score, vmap = deccode_output_score_and_ptss(outputs, 200, 3)
@@ -176,17 +176,17 @@ def pred_squares(image,
     # x = tf.expand_dims(topk_indices % w, axis=-1)
     # yx = tf.concat([y, x], axis=-1)
 
-    ### fast suppression using pytorch op
-    acc_map = torch.from_numpy(acc_map_np).unsqueeze(0).unsqueeze(0)
+    ### fast suppression using pypaddle op
+    acc_map = paddle.to_tensor(acc_map_np).unsqueeze(0).unsqueeze(0)
     _,_, h, w = acc_map.shape
     max_acc_map = F.max_pool2d(acc_map,kernel_size=5, stride=1, padding=2)
     acc_map = acc_map * ( (acc_map == max_acc_map).float() )
     flatten_acc_map = acc_map.reshape([-1, ])
 
-    scores, indices = torch.topk(flatten_acc_map, len(pts), dim=-1, largest=True)
-    yy = torch.div(indices, w, rounding_mode='floor').unsqueeze(-1)
-    xx = torch.fmod(indices, w).unsqueeze(-1)
-    yx = torch.cat((yy, xx), dim=-1)
+    scores, indices = paddle.topk(flatten_acc_map, len(pts), dim=-1, largest=True)
+    yy = paddle.div(indices, w, rounding_mode='floor').unsqueeze(-1)
+    xx = paddle.fmod(indices, w).unsqueeze(-1)
+    yx = paddle.cat((yy, xx), dim=-1)
 
     yx = yx.detach().cpu().numpy()
 

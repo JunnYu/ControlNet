@@ -1,5 +1,5 @@
-import torch
-import torch.nn as nn
+import paddle
+import paddle.nn as nn
 import numpy as np
 from functools import partial
 
@@ -28,21 +28,21 @@ class AbstractLowScaleModel(nn.Module):
         self.linear_end = linear_end
         assert alphas_cumprod.shape[0] == self.num_timesteps, 'alphas have to be defined for each timestep'
 
-        to_torch = partial(torch.tensor, dtype=torch.float32)
+        to_paddle = partial(paddle.to_tensor, dtype=paddle.float32)
 
-        self.register_buffer('betas', to_torch(betas))
-        self.register_buffer('alphas_cumprod', to_torch(alphas_cumprod))
-        self.register_buffer('alphas_cumprod_prev', to_torch(alphas_cumprod_prev))
+        self.register_buffer('betas', to_paddle(betas))
+        self.register_buffer('alphas_cumprod', to_paddle(alphas_cumprod))
+        self.register_buffer('alphas_cumprod_prev', to_paddle(alphas_cumprod_prev))
 
         # calculations for diffusion q(x_t | x_{t-1}) and others
-        self.register_buffer('sqrt_alphas_cumprod', to_torch(np.sqrt(alphas_cumprod)))
-        self.register_buffer('sqrt_one_minus_alphas_cumprod', to_torch(np.sqrt(1. - alphas_cumprod)))
-        self.register_buffer('log_one_minus_alphas_cumprod', to_torch(np.log(1. - alphas_cumprod)))
-        self.register_buffer('sqrt_recip_alphas_cumprod', to_torch(np.sqrt(1. / alphas_cumprod)))
-        self.register_buffer('sqrt_recipm1_alphas_cumprod', to_torch(np.sqrt(1. / alphas_cumprod - 1)))
+        self.register_buffer('sqrt_alphas_cumprod', to_paddle(np.sqrt(alphas_cumprod)))
+        self.register_buffer('sqrt_one_minus_alphas_cumprod', to_paddle(np.sqrt(1. - alphas_cumprod)))
+        self.register_buffer('log_one_minus_alphas_cumprod', to_paddle(np.log(1. - alphas_cumprod)))
+        self.register_buffer('sqrt_recip_alphas_cumprod', to_paddle(np.sqrt(1. / alphas_cumprod)))
+        self.register_buffer('sqrt_recipm1_alphas_cumprod', to_paddle(np.sqrt(1. / alphas_cumprod - 1)))
 
     def q_sample(self, x_start, t, noise=None):
-        noise = default(noise, lambda: torch.randn_like(x_start))
+        noise = default(noise, lambda: paddle.randn_like(x_start))
         return (extract_into_tensor(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start +
                 extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise)
 
@@ -61,7 +61,7 @@ class SimpleImageConcat(AbstractLowScaleModel):
 
     def forward(self, x):
         # fix to constant noise level
-        return x, torch.zeros(x.shape[0], device=x.device).long()
+        return x, paddle.zeros(x.shape[0], device=x.device).long()
 
 
 class ImageConcatWithNoiseAugmentation(AbstractLowScaleModel):
@@ -71,9 +71,9 @@ class ImageConcatWithNoiseAugmentation(AbstractLowScaleModel):
 
     def forward(self, x, noise_level=None):
         if noise_level is None:
-            noise_level = torch.randint(0, self.max_noise_level, (x.shape[0],), device=x.device).long()
+            noise_level = paddle.randint(0, self.max_noise_level, (x.shape[0],), device=x.device).long()
         else:
-            assert isinstance(noise_level, torch.Tensor)
+            assert isinstance(noise_level, paddle.Tensor)
         z = self.q_sample(x, noise_level)
         return z, noise_level
 

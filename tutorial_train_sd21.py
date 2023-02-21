@@ -1,7 +1,7 @@
 from share import *
 
-import pytorch_lightning as pl
-from torch.utils.data import DataLoader
+import pypaddle_lightning as pl
+from paddle.utils.data import DataLoader
 from tutorial_dataset import MyDataset
 from cldm.logger import ImageLogger
 from cldm.model import create_model, load_state_dict
@@ -16,7 +16,7 @@ sd_locked = True
 only_mid_control = False
 
 
-# First use cpu to load models. Pytorch Lightning will automatically move it to GPUs.
+# First use cpu to load models. Pypaddle Lightning will automatically move it to GPUs.
 model = create_model('./models/cldm_v21.yaml').cpu()
 model.load_state_dict(load_state_dict(resume_path, location='cpu'))
 model.learning_rate = learning_rate

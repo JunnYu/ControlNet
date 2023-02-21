@@ -1,0 +1,25 @@
+# Copyright (c) OpenMMLab. All rights reserved.
+import paddle
+import paddle.nn as nn
+
+from .registry import ACTIVATION_LAYERS
+
+
+@ACTIVATION_LAYERS.register_module()
+class Swish(nn.Module):
+    """Swish Module.
+
+    This module applies the swish function:
+
+    .. math::
+        Swish(x) = x * Sigmoid(x)
+
+    Returns:
+        Tensor: The output tensor.
+    """
+
+    def __init__(self):
+        super(Swish, self).__init__()
+
+    def forward(self, x):
+        return x * paddle.sigmoid(x)

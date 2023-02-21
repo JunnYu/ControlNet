@@ -1,8 +1,8 @@
-import torch
+import paddle
 from collections import OrderedDict
 
-import torch
-import torch.nn as nn
+import paddle
+import paddle.nn as nn
 
 def make_layers(block, no_relu_layers):
     layers = []
@@ -17,7 +17,7 @@ def make_layers(block, no_relu_layers):
                                padding=v[4])
             layers.append((layer_name, conv2d))
             if layer_name not in no_relu_layers:
-                layers.append(('relu_'+layer_name, nn.ReLU(inplace=True)))
+                layers.append(('relu_'+layer_name, nn.ReLU()))
 
     return nn.Sequential(OrderedDict(layers))
 
@@ -117,23 +117,23 @@ class bodypose_model(nn.Module):
 
         out1_1 = self.model1_1(out1)
         out1_2 = self.model1_2(out1)
-        out2 = torch.cat([out1_1, out1_2, out1], 1)
+        out2 = paddle.cat([out1_1, out1_2, out1], 1)
 
         out2_1 = self.model2_1(out2)
         out2_2 = self.model2_2(out2)
-        out3 = torch.cat([out2_1, out2_2, out1], 1)
+        out3 = paddle.cat([out2_1, out2_2, out1], 1)
 
         out3_1 = self.model3_1(out3)
         out3_2 = self.model3_2(out3)
-        out4 = torch.cat([out3_1, out3_2, out1], 1)
+        out4 = paddle.cat([out3_1, out3_2, out1], 1)
 
         out4_1 = self.model4_1(out4)
         out4_2 = self.model4_2(out4)
-        out5 = torch.cat([out4_1, out4_2, out1], 1)
+        out5 = paddle.cat([out4_1, out4_2, out1], 1)
 
         out5_1 = self.model5_1(out5)
         out5_2 = self.model5_2(out5)
-        out6 = torch.cat([out5_1, out5_2, out1], 1)
+        out6 = paddle.cat([out5_1, out5_2, out1], 1)
 
         out6_1 = self.model6_1(out6)
         out6_2 = self.model6_2(out6)
@@ -204,15 +204,15 @@ class handpose_model(nn.Module):
     def forward(self, x):
         out1_0 = self.model1_0(x)
         out1_1 = self.model1_1(out1_0)
-        concat_stage2 = torch.cat([out1_1, out1_0], 1)
+        concat_stage2 = paddle.cat([out1_1, out1_0], 1)
         out_stage2 = self.model2(concat_stage2)
-        concat_stage3 = torch.cat([out_stage2, out1_0], 1)
+        concat_stage3 = paddle.cat([out_stage2, out1_0], 1)
         out_stage3 = self.model3(concat_stage3)
-        concat_stage4 = torch.cat([out_stage3, out1_0], 1)
+        concat_stage4 = paddle.cat([out_stage3, out1_0], 1)
         out_stage4 = self.model4(concat_stage4)
-        concat_stage5 = torch.cat([out_stage4, out1_0], 1)
+        concat_stage5 = paddle.cat([out_stage4, out1_0], 1)
         out_stage5 = self.model5(concat_stage5)
-        concat_stage6 = torch.cat([out_stage5, out1_0], 1)
+        concat_stage6 = paddle.cat([out_stage5, out1_0], 1)
         out_stage6 = self.model6(concat_stage6)
         return out_stage6
 

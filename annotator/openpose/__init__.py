@@ -1,7 +1,7 @@
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 
-import torch
+import paddle
 import numpy as np
 from . import util
 from .body import Body
@@ -19,16 +19,16 @@ class OpenposeDetector:
         hand_modelpath = os.path.join(annotator_ckpts_path, "hand_pose_model.pth")
 
         if not os.path.exists(hand_modelpath):
-            from basicsr.utils.download_util import load_file_from_url
-            load_file_from_url(body_model_path, model_dir=annotator_ckpts_path)
-            load_file_from_url(hand_model_path, model_dir=annotator_ckpts_path)
+            from paddlenlp.utils.downloader import get_path_from_url_with_filelock
+            get_path_from_url_with_filelock(body_model_path, root_dir=annotator_ckpts_path)
+            get_path_from_url_with_filelock(hand_model_path, root_dir=annotator_ckpts_path)
 
         self.body_estimation = Body(body_modelpath)
         self.hand_estimation = Hand(hand_modelpath)
 
     def __call__(self, oriImg, hand=False):
         oriImg = oriImg[:, :, ::-1].copy()
-        with torch.no_grad():
+        with paddle.no_grad():
             candidate, subset = self.body_estimation(oriImg)
             canvas = np.zeros_like(oriImg)
             canvas = util.draw_bodypose(canvas, candidate, subset)

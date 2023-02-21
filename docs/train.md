@@ -40,14 +40,14 @@ In the "fill50k/prompt.json", you will have their filenames and prompts. Each pr
 
 ## Step 2 - Load the dataset
 
-Then you need to write a simple script to read this dataset for pytorch. (In fact we have written it for you in "tutorial_dataset.py".)
+Then you need to write a simple script to read this dataset for pypaddle. (In fact we have written it for you in "tutorial_dataset.py".)
 
 ```python
 import json
 import cv2
 import numpy as np
 
-from torch.utils.data import Dataset
+from paddle.utils.data import Dataset
 
 
 class MyDataset(Dataset):
@@ -148,8 +148,8 @@ Happy! We finally come to the most exciting part: training!
 The training code in "tutorial_train.py" is actually surprisingly simple:
 
 ```python
-import pytorch_lightning as pl
-from torch.utils.data import DataLoader
+import pypaddle_lightning as pl
+from paddle.utils.data import DataLoader
 from tutorial_dataset import MyDataset
 from cldm.logger import ImageLogger
 from cldm.model import create_model, load_state_dict
@@ -164,7 +164,7 @@ sd_locked = True
 only_mid_control = False
 
 
-# First use cpu to load models. Pytorch Lightning will automatically move it to GPUs.
+# First use cpu to load models. Pypaddle Lightning will automatically move it to GPUs.
 model = create_model('./models/cldm_v15.yaml').cpu()
 model.load_state_dict(load_state_dict(resume_path, location='cpu'))
 model.learning_rate = learning_rate
@@ -185,9 +185,9 @@ trainer.fit(model, dataloader)
 ```
 (or "tutorial_train_sd21.py" if you are using SD2)
 
-Thanks to our organized dataset pytorch object and the power of pytorch_lightning, the entire code is just super short.
+Thanks to our organized dataset pypaddle object and the power of pypaddle_lightning, the entire code is just super short.
 
-Now, you may take a look at [Pytorch Lightning Official DOC](https://pytorch-lightning.readthedocs.io/en/latest/api/pytorch_lightning.trainer.trainer.Trainer.html?highlight=trainer) to find out how to enable many useful features like gradient accumulation, multiple GPU training, accelerated dataset loading, flexible checkpoint saving, etc. All these only need about one line of code. Great!
+Now, you may take a look at [Pypaddle Lightning Official DOC](https://pypaddle-lightning.readthedocs.io/en/latest/api/pypaddle_lightning.trainer.trainer.Trainer.html?highlight=trainer) to find out how to enable many useful features like gradient accumulation, multiple GPU training, accelerated dataset loading, flexible checkpoint saving, etc. All these only need about one line of code. Great!
 
 Note that if you find OOM, perhaps you need to enable [Low VRAM mode](low_vram.md), and perhaps you also need to use smaller batch size and gradient accumulation. Or you may also want to use some “advanced” tricks like sliced attention or xformers. For example:
 

@@ -1,14 +1,14 @@
 from inspect import isfunction
 import math
-import torch
-import torch.nn.functional as F
-from torch import nn, einsum
+import paddle
+import paddle.nn.functional as F
+from paddle import nn, einsum
 from einops import rearrange, repeat
 from typing import Optional, Any
 
 from ldm.modules.diffusionmodules.util import checkpoint
 
-
+from paddlenlp.utils.initializer import uniform_
 try:
     import xformers
     import xformers.ops
@@ -35,13 +35,13 @@ def default(val, d):
 
 
 def max_neg_value(t):
-    return -torch.finfo(t.dtype).max
+    return -paddle.finfo(t.dtype).max
 
 
 def init_(tensor):
     dim = tensor.shape[-1]
     std = 1 / math.sqrt(dim)
-    tensor.uniform_(-std, std)
+    uniform_(tensor, -std, std)
     return tensor
 
 
@@ -49,7 +49,7 @@ def init_(tensor):
 class GEGLU(nn.Module):
     def __init__(self, dim_in, dim_out):
         super().__init__()
-        self.proj = nn.Linear(dim_in, dim_out * 2)
+        self.proj = nn.LinearPT(dim_in, dim_out * 2)
 
     def forward(self, x):
         x, gate = self.proj(x).chunk(2, dim=-1)
@@ -62,14 +62,14 @@ class FeedForward(nn.Module):
         inner_dim = int(dim * mult)
         dim_out = default(dim_out, dim)
         project_in = nn.Sequential(
-            nn.Linear(dim, inner_dim),
+            nn.LinearPT(dim, inner_dim),
             nn.GELU()
         ) if not glu else GEGLU(dim, inner_dim)
 
         self.net = nn.Sequential(
             project_in,
             nn.Dropout(dropout),
-            nn.Linear(inner_dim, dim_out)
+            nn.LinearPT(inner_dim, dim_out)
         )
 
     def forward(self, x):
@@ -86,7 +86,7 @@ def zero_module(module):
 
 
 def Normalize(in_channels):
-    return torch.nn.GroupNorm(num_groups=32, num_channels=in_channels, eps=1e-6, affine=True)
+    return paddle.nn.GroupNorm(num_groups=32, num_channels=in_channels, eps=1e-6, affine=True)
 
 
 class SpatialSelfAttention(nn.Module):
@@ -95,22 +95,22 @@ class SpatialSelfAttention(nn.Module):
         self.in_channels = in_channels
 
         self.norm = Normalize(in_channels)
-        self.q = torch.nn.Conv2d(in_channels,
+        self.q = paddle.nn.Conv2d(in_channels,
                                  in_channels,
                                  kernel_size=1,
                                  stride=1,
                                  padding=0)
-        self.k = torch.nn.Conv2d(in_channels,
+        self.k = paddle.nn.Conv2d(in_channels,
                                  in_channels,
                                  kernel_size=1,
                                  stride=1,
                                  padding=0)
-        self.v = torch.nn.Conv2d(in_channels,
+        self.v = paddle.nn.Conv2d(in_channels,
                                  in_channels,
                                  kernel_size=1,
                                  stride=1,
                                  padding=0)
-        self.proj_out = torch.nn.Conv2d(in_channels,
+        self.proj_out = paddle.nn.Conv2d(in_channels,
                                         in_channels,
                                         kernel_size=1,
                                         stride=1,
@@ -127,15 +127,15 @@ class SpatialSelfAttention(nn.Module):
         b,c,h,w = q.shape
         q = rearrange(q, 'b c h w -> b (h w) c')
         k = rearrange(k, 'b c h w -> b c (h w)')
-        w_ = torch.einsum('bij,bjk->bik', q, k)
+        w_ = paddle.einsum('bij,bjk->bik', q, k)
 
         w_ = w_ * (int(c)**(-0.5))
-        w_ = torch.nn.functional.softmax(w_, dim=2)
+        w_ = paddle.nn.functional.softmax(w_, axis=2)
 
         # attend to values
         v = rearrange(v, 'b c h w -> b c (h w)')
         w_ = rearrange(w_, 'b i j -> b j i')
-        h_ = torch.einsum('bij,bjk->bik', v, w_)
+        h_ = paddle.einsum('bij,bjk->bik', v, w_)
         h_ = rearrange(h_, 'b c (h w) -> b c h w', h=h)
         h_ = self.proj_out(h_)
 
@@ -151,12 +151,12 @@ class CrossAttention(nn.Module):
         self.scale = dim_head ** -0.5
         self.heads = heads
 
-        self.to_q = nn.Linear(query_dim, inner_dim, bias=False)
-        self.to_k = nn.Linear(context_dim, inner_dim, bias=False)
-        self.to_v = nn.Linear(context_dim, inner_dim, bias=False)
+        self.to_q = nn.LinearPT(query_dim, inner_dim, bias=False)
+        self.to_k = nn.LinearPT(context_dim, inner_dim, bias=False)
+        self.to_v = nn.LinearPT(context_dim, inner_dim, bias=False)
 
         self.to_out = nn.Sequential(
-            nn.Linear(inner_dim, query_dim),
+            nn.LinearPT(inner_dim, query_dim),
             nn.Dropout(dropout)
         )
 
@@ -172,7 +172,7 @@ class CrossAttention(nn.Module):
 
         # force cast to fp32 to avoid overflowing
         if _ATTN_PRECISION =="fp32":
-            with torch.autocast(enabled=False, device_type = 'cuda'):
+            with paddle.amp.auto_cast(False):
                 q, k = q.float(), k.float()
                 sim = einsum('b i d, b j d -> b i j', q, k) * self.scale
         else:
@@ -182,7 +182,7 @@ class CrossAttention(nn.Module):
     
         if exists(mask):
             mask = rearrange(mask, 'b ... -> b (...)')
-            max_neg_value = -torch.finfo(sim.dtype).max
+            max_neg_value = -paddle.finfo(sim.dtype).max
             mask = repeat(mask, 'b j -> (b h) () j', h=h)
             sim.masked_fill_(~mask, max_neg_value)
 
@@ -206,11 +206,11 @@ class MemoryEfficientCrossAttention(nn.Module):
         self.heads = heads
         self.dim_head = dim_head
 
-        self.to_q = nn.Linear(query_dim, inner_dim, bias=False)
-        self.to_k = nn.Linear(context_dim, inner_dim, bias=False)
-        self.to_v = nn.Linear(context_dim, inner_dim, bias=False)
+        self.to_q = nn.LinearPT(query_dim, inner_dim, bias=False)
+        self.to_k = nn.LinearPT(context_dim, inner_dim, bias=False)
+        self.to_v = nn.LinearPT(context_dim, inner_dim, bias=False)
 
-        self.to_out = nn.Sequential(nn.Linear(inner_dim, query_dim), nn.Dropout(dropout))
+        self.to_out = nn.Sequential(nn.LinearPT(inner_dim, query_dim), nn.Dropout(dropout))
         self.attention_op: Optional[Any] = None
 
     def forward(self, x, context=None, mask=None):
@@ -301,7 +301,7 @@ class SpatialTransformer(nn.Module):
                                      stride=1,
                                      padding=0)
         else:
-            self.proj_in = nn.Linear(in_channels, inner_dim)
+            self.proj_in = nn.LinearPT(in_channels, inner_dim)
 
         self.transformer_blocks = nn.ModuleList(
             [BasicTransformerBlock(inner_dim, n_heads, d_head, dropout=dropout, context_dim=context_dim[d],
@@ -315,7 +315,7 @@ class SpatialTransformer(nn.Module):
                                                   stride=1,
                                                   padding=0))
         else:
-            self.proj_out = zero_module(nn.Linear(in_channels, inner_dim))
+            self.proj_out = zero_module(nn.LinearPT(in_channels, inner_dim))
         self.use_linear = use_linear
 
     def forward(self, x, context=None):

@@ -2,7 +2,7 @@ import json
 import cv2
 import numpy as np
 
-from torch.utils.data import Dataset
+from paddle.utils.data import Dataset
 
 
 class MyDataset(Dataset):

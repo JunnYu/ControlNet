@@ -1,5 +1,5 @@
-import torch
-import torch.nn.functional as F
+import paddle
+import paddle.nn.functional as F
 import math
 from tqdm import tqdm
 
@@ -34,8 +34,8 @@ class NoiseScheduleVP:
             e.g. for N = 1000, we have t_0 = 1e-3 and T = t_{N-1} = 1.
             We solve the corresponding diffusion ODE from time T = 1 to time t_0 = 1e-3.
             Args:
-                betas: A `torch.Tensor`. The beta array for the discrete-time DPM. (See the original DDPM paper for details)
-                alphas_cumprod: A `torch.Tensor`. The cumprod alphas for the discrete-time DPM. (See the original DDPM paper for details)
+                betas: A `paddle.Tensor`. The beta array for the discrete-time DPM. (See the original DDPM paper for details)
+                alphas_cumprod: A `paddle.Tensor`. The cumprod alphas for the discrete-time DPM. (See the original DDPM paper for details)
             Note that we always have alphas_cumprod = cumprod(betas). Therefore, we only need to set one of `betas` and `alphas_cumprod`.
             **Important**:  Please pay special attention for the args for `alphas_cumprod`:
                 The `alphas_cumprod` is the \hat{alpha_n} arrays in the notations of DDPM. Specifically, DDPMs assume that
@@ -78,13 +78,13 @@ class NoiseScheduleVP:
         self.schedule = schedule
         if schedule == 'discrete':
             if betas is not None:
-                log_alphas = 0.5 * torch.log(1 - betas).cumsum(dim=0)
+                log_alphas = 0.5 * paddle.log(1 - betas).cumsum(0)
             else:
                 assert alphas_cumprod is not None
-                log_alphas = 0.5 * torch.log(alphas_cumprod)
+                log_alphas = 0.5 * paddle.log(alphas_cumprod)
             self.total_N = len(log_alphas)
             self.T = 1.
-            self.t_array = torch.linspace(0., 1., self.total_N + 1)[1:].reshape((1, -1))
+            self.t_array = paddle.linspace(0., 1., self.total_N + 1)[1:].reshape((1, -1))
             self.log_alpha_array = log_alphas.reshape((1, -1,))
         else:
             self.total_N = 1000
@@ -113,7 +113,7 @@ class NoiseScheduleVP:
         elif self.schedule == 'linear':
             return -0.25 * t ** 2 * (self.beta_1 - self.beta_0) - 0.5 * t * self.beta_0
         elif self.schedule == 'cosine':
-            log_alpha_fn = lambda s: torch.log(torch.cos((s + self.cosine_s) / (1. + self.cosine_s) * math.pi / 2.))
+            log_alpha_fn = lambda s: paddle.log(paddle.cos((s + self.cosine_s) / (1. + self.cosine_s) * math.pi / 2.))
             log_alpha_t = log_alpha_fn(t) - self.cosine_log_alpha_0
             return log_alpha_t
 
@@ -121,20 +121,20 @@ class NoiseScheduleVP:
         """
         Compute alpha_t of a given continuous-time label t in [0, T].
         """
-        return torch.exp(self.marginal_log_mean_coeff(t))
+        return paddle.exp(self.marginal_log_mean_coeff(t))
 
     def marginal_std(self, t):
         """
         Compute sigma_t of a given continuous-time label t in [0, T].
         """
-        return torch.sqrt(1. - torch.exp(2. * self.marginal_log_mean_coeff(t)))
+        return paddle.sqrt(1. - paddle.exp(2. * self.marginal_log_mean_coeff(t)))
 
     def marginal_lambda(self, t):
         """
         Compute lambda_t = log(alpha_t) - log(sigma_t) of a given continuous-time label t in [0, T].
         """
         log_mean_coeff = self.marginal_log_mean_coeff(t)
-        log_std = 0.5 * torch.log(1. - torch.exp(2. * log_mean_coeff))
+        log_std = 0.5 * paddle.log(1. - paddle.exp(2. * log_mean_coeff))
         return log_mean_coeff - log_std
 
     def inverse_lambda(self, lamb):
@@ -142,17 +142,17 @@ class NoiseScheduleVP:
         Compute the continuous-time label t in [0, T] of a given half-logSNR lambda_t.
         """
         if self.schedule == 'linear':
-            tmp = 2. * (self.beta_1 - self.beta_0) * torch.logaddexp(-2. * lamb, torch.zeros((1,)).to(lamb))
+            tmp = 2. * (self.beta_1 - self.beta_0) * paddle.logaddexp(-2. * lamb, paddle.zeros((1,)).to(lamb))
             Delta = self.beta_0 ** 2 + tmp
-            return tmp / (torch.sqrt(Delta) + self.beta_0) / (self.beta_1 - self.beta_0)
+            return tmp / (paddle.sqrt(Delta) + self.beta_0) / (self.beta_1 - self.beta_0)
         elif self.schedule == 'discrete':
-            log_alpha = -0.5 * torch.logaddexp(torch.zeros((1,)).to(lamb.device), -2. * lamb)
-            t = interpolate_fn(log_alpha.reshape((-1, 1)), torch.flip(self.log_alpha_array.to(lamb.device), [1]),
-                               torch.flip(self.t_array.to(lamb.device), [1]))
+            log_alpha = -0.5 * paddle.logaddexp(paddle.zeros((1,)).to(lamb.device), -2. * lamb)
+            t = interpolate_fn(log_alpha.reshape((-1, 1)), paddle.flip(self.log_alpha_array.to(lamb.device), [1]),
+                               paddle.flip(self.t_array.to(lamb.device), [1]))
             return t.reshape((-1,))
         else:
-            log_alpha = -0.5 * torch.logaddexp(-2. * lamb, torch.zeros((1,)).to(lamb))
-            t_fn = lambda log_alpha_t: torch.arccos(torch.exp(log_alpha_t + self.cosine_log_alpha_0)) * 2. * (
+            log_alpha = -0.5 * paddle.logaddexp(-2. * lamb, paddle.zeros((1,)).to(lamb))
+            t_fn = lambda log_alpha_t: paddle.arccos(paddle.exp(log_alpha_t + self.cosine_log_alpha_0)) * 2. * (
                         1. + self.cosine_s) / math.pi - self.cosine_s
             t = t_fn(log_alpha)
             return t
@@ -232,9 +232,9 @@ def model_wrapper(
         model_kwargs: A `dict`. A dict for the other inputs of the model function.
         guidance_type: A `str`. The type of the guidance for sampling.
                     "uncond" or "classifier" or "classifier-free".
-        condition: A pytorch tensor. The condition for the guided sampling.
+        condition: A pypaddle tensor. The condition for the guided sampling.
                     Only used for "classifier" or "classifier-free" guidance type.
-        unconditional_condition: A pytorch tensor. The condition for the unconditional sampling.
+        unconditional_condition: A pypaddle tensor. The condition for the unconditional sampling.
                     Only used for "classifier-free" guidance type.
         guidance_scale: A `float`. The scale for the guided sampling.
         classifier_fn: A classifier function. Only used for the classifier guidance.
@@ -266,25 +266,25 @@ def model_wrapper(
             return output
         elif model_type == "x_start":
             alpha_t, sigma_t = noise_schedule.marginal_alpha(t_continuous), noise_schedule.marginal_std(t_continuous)
-            dims = x.dim()
+            dims = x.ndim
             return (x - expand_dims(alpha_t, dims) * output) / expand_dims(sigma_t, dims)
         elif model_type == "v":
             alpha_t, sigma_t = noise_schedule.marginal_alpha(t_continuous), noise_schedule.marginal_std(t_continuous)
-            dims = x.dim()
+            dims = x.ndim
             return expand_dims(alpha_t, dims) * output + expand_dims(sigma_t, dims) * x
         elif model_type == "score":
             sigma_t = noise_schedule.marginal_std(t_continuous)
-            dims = x.dim()
+            dims = x.ndim
             return -expand_dims(sigma_t, dims) * output
 
     def cond_grad_fn(x, t_input):
         """
         Compute the gradient of the classifier, i.e. nabla_{x} log p_t(cond | x_t).
         """
-        with torch.enable_grad():
+        with paddle.enable_grad():
             x_in = x.detach().requires_grad_(True)
             log_prob = classifier_fn(x_in, t_input, condition, **classifier_kwargs)
-            return torch.autograd.grad(log_prob.sum(), x_in)[0]
+            return paddle.autograd.grad(log_prob.sum(), x_in)[0]
 
     def model_fn(x, t_continuous):
         """
@@ -300,14 +300,14 @@ def model_wrapper(
             cond_grad = cond_grad_fn(x, t_input)
             sigma_t = noise_schedule.marginal_std(t_continuous)
             noise = noise_pred_fn(x, t_continuous)
-            return noise - guidance_scale * expand_dims(sigma_t, dims=cond_grad.dim()) * cond_grad
+            return noise - guidance_scale * expand_dims(sigma_t, dims=cond_grad.ndim) * cond_grad
         elif guidance_type == "classifier-free":
             if guidance_scale == 1. or unconditional_condition is None:
                 return noise_pred_fn(x, t_continuous, cond=condition)
             else:
-                x_in = torch.cat([x] * 2)
-                t_in = torch.cat([t_continuous] * 2)
-                c_in = torch.cat([unconditional_condition, condition])
+                x_in = paddle.cat([x] * 2)
+                t_in = paddle.cat([t_continuous] * 2)
+                c_in = paddle.cat([unconditional_condition, condition])
                 noise_uncond, noise = noise_pred_fn(x_in, t_in, cond=c_in).chunk(2)
                 return noise_uncond + guidance_scale * (noise - noise_uncond)
 
@@ -354,14 +354,14 @@ class DPM_Solver:
         Return the data prediction model (with thresholding).
         """
         noise = self.noise_prediction_fn(x, t)
-        dims = x.dim()
+        dims = x.ndim
         alpha_t, sigma_t = self.noise_schedule.marginal_alpha(t), self.noise_schedule.marginal_std(t)
         x0 = (x - expand_dims(sigma_t, dims) * noise) / expand_dims(alpha_t, dims)
         if self.thresholding:
             p = 0.995  # A hyperparameter in the paper of "Imagen" [1].
-            s = torch.quantile(torch.abs(x0).reshape((x0.shape[0], -1)), p, dim=1)
-            s = expand_dims(torch.maximum(s, self.max_val * torch.ones_like(s).to(s.device)), dims)
-            x0 = torch.clamp(x0, -s, s) / s
+            s = paddle.quantile(paddle.abs(x0).reshape((x0.shape[0], -1)), p, axis=1)
+            s = expand_dims(paddle.maximum(s, self.max_val * paddle.ones_like(s).to(s.device)), dims)
+            x0 = paddle.clamp(x0, -s, s) / s
         return x0
 
     def model_fn(self, x, t):
@@ -383,20 +383,20 @@ class DPM_Solver:
             t_T: A `float`. The starting time of the sampling (default is T).
             t_0: A `float`. The ending time of the sampling (default is epsilon).
             N: A `int`. The total number of the spacing of the time steps.
-            device: A torch device.
+            device: A paddle device.
         Returns:
-            A pytorch tensor of the time steps, with the shape (N + 1,).
+            A pypaddle tensor of the time steps, with the shape (N + 1,).
         """
         if skip_type == 'logSNR':
-            lambda_T = self.noise_schedule.marginal_lambda(torch.tensor(t_T).to(device))
-            lambda_0 = self.noise_schedule.marginal_lambda(torch.tensor(t_0).to(device))
-            logSNR_steps = torch.linspace(lambda_T.cpu().item(), lambda_0.cpu().item(), N + 1).to(device)
+            lambda_T = self.noise_schedule.marginal_lambda(paddle.to_tensor(t_T).to(device))
+            lambda_0 = self.noise_schedule.marginal_lambda(paddle.to_tensor(t_0).to(device))
+            logSNR_steps = paddle.linspace(lambda_T.cpu().item(), lambda_0.cpu().item(), N + 1).to(device)
             return self.noise_schedule.inverse_lambda(logSNR_steps)
         elif skip_type == 'time_uniform':
-            return torch.linspace(t_T, t_0, N + 1).to(device)
+            return paddle.linspace(t_T, t_0, N + 1).to(device)
         elif skip_type == 'time_quadratic':
             t_order = 2
-            t = torch.linspace(t_T ** (1. / t_order), t_0 ** (1. / t_order), N + 1).pow(t_order).to(device)
+            t = paddle.linspace(t_T ** (1. / t_order), t_0 ** (1. / t_order), N + 1).pow(t_order).to(device)
             return t
         else:
             raise ValueError(
@@ -428,7 +428,7 @@ class DPM_Solver:
                 - 'time_quadratic': quadratic time for the time steps. (Used in DDIM for low-resolutional data.)
             t_T: A `float`. The starting time of the sampling (default is T).
             t_0: A `float`. The ending time of the sampling (default is epsilon).
-            device: A torch device.
+            device: A paddle device.
         Returns:
             orders: A list of the solver order of each step.
         """
@@ -457,7 +457,7 @@ class DPM_Solver:
             timesteps_outer = self.get_time_steps(skip_type, t_T, t_0, K, device)
         else:
             timesteps_outer = self.get_time_steps(skip_type, t_T, t_0, steps, device)[
-                torch.cumsum(torch.tensor([0, ] + orders)).to(device)]
+                paddle.cumsum(paddle.to_tensor([0, ] + orders)).to(device)]
         return timesteps_outer, orders
 
     def denoise_to_zero_fn(self, x, s):
@@ -470,25 +470,25 @@ class DPM_Solver:
         """
         DPM-Solver-1 (equivalent to DDIM) from time `s` to time `t`.
         Args:
-            x: A pytorch tensor. The initial value at time `s`.
-            s: A pytorch tensor. The starting time, with the shape (x.shape[0],).
-            t: A pytorch tensor. The ending time, with the shape (x.shape[0],).
-            model_s: A pytorch tensor. The model function evaluated at time `s`.
+            x: A pypaddle tensor. The initial value at time `s`.
+            s: A pypaddle tensor. The starting time, with the shape (x.shape[0],).
+            t: A pypaddle tensor. The ending time, with the shape (x.shape[0],).
+            model_s: A pypaddle tensor. The model function evaluated at time `s`.
                 If `model_s` is None, we evaluate the model by `x` and `s`; otherwise we directly use it.
             return_intermediate: A `bool`. If true, also return the model value at time `s`.
         Returns:
-            x_t: A pytorch tensor. The approximated solution at time `t`.
+            x_t: A pypaddle tensor. The approximated solution at time `t`.
         """
         ns = self.noise_schedule
-        dims = x.dim()
+        dims = x.ndim
         lambda_s, lambda_t = ns.marginal_lambda(s), ns.marginal_lambda(t)
         h = lambda_t - lambda_s
         log_alpha_s, log_alpha_t = ns.marginal_log_mean_coeff(s), ns.marginal_log_mean_coeff(t)
         sigma_s, sigma_t = ns.marginal_std(s), ns.marginal_std(t)
-        alpha_t = torch.exp(log_alpha_t)
+        alpha_t = paddle.exp(log_alpha_t)
 
         if self.predict_x0:
-            phi_1 = torch.expm1(-h)
+            phi_1 = paddle.expm1(-h)
             if model_s is None:
                 model_s = self.model_fn(x, s)
             x_t = (
@@ -500,11 +500,11 @@ class DPM_Solver:
             else:
                 return x_t
         else:
-            phi_1 = torch.expm1(h)
+            phi_1 = paddle.expm1(h)
             if model_s is None:
                 model_s = self.model_fn(x, s)
             x_t = (
-                    expand_dims(torch.exp(log_alpha_t - log_alpha_s), dims) * x
+                    expand_dims(paddle.exp(log_alpha_t - log_alpha_s), dims) * x
                     - expand_dims(sigma_t * phi_1, dims) * model_s
             )
             if return_intermediate:
@@ -517,24 +517,24 @@ class DPM_Solver:
         """
         Singlestep solver DPM-Solver-2 from time `s` to time `t`.
         Args:
-            x: A pytorch tensor. The initial value at time `s`.
-            s: A pytorch tensor. The starting time, with the shape (x.shape[0],).
-            t: A pytorch tensor. The ending time, with the shape (x.shape[0],).
+            x: A pypaddle tensor. The initial value at time `s`.
+            s: A pypaddle tensor. The starting time, with the shape (x.shape[0],).
+            t: A pypaddle tensor. The ending time, with the shape (x.shape[0],).
             r1: A `float`. The hyperparameter of the second-order solver.
-            model_s: A pytorch tensor. The model function evaluated at time `s`.
+            model_s: A pypaddle tensor. The model function evaluated at time `s`.
                 If `model_s` is None, we evaluate the model by `x` and `s`; otherwise we directly use it.
             return_intermediate: A `bool`. If true, also return the model value at time `s` and `s1` (the intermediate time).
             solver_type: either 'dpm_solver' or 'taylor'. The type for the high-order solvers.
                 The type slightly impacts the performance. We recommend to use 'dpm_solver' type.
         Returns:
-            x_t: A pytorch tensor. The approximated solution at time `t`.
+            x_t: A pypaddle tensor. The approximated solution at time `t`.
         """
         if solver_type not in ['dpm_solver', 'taylor']:
             raise ValueError("'solver_type' must be either 'dpm_solver' or 'taylor', got {}".format(solver_type))
         if r1 is None:
             r1 = 0.5
         ns = self.noise_schedule
-        dims = x.dim()
+        dims = x.ndim
         lambda_s, lambda_t = ns.marginal_lambda(s), ns.marginal_lambda(t)
         h = lambda_t - lambda_s
         lambda_s1 = lambda_s + r1 * h
@@ -542,11 +542,11 @@ class DPM_Solver:
         log_alpha_s, log_alpha_s1, log_alpha_t = ns.marginal_log_mean_coeff(s), ns.marginal_log_mean_coeff(
             s1), ns.marginal_log_mean_coeff(t)
         sigma_s, sigma_s1, sigma_t = ns.marginal_std(s), ns.marginal_std(s1), ns.marginal_std(t)
-        alpha_s1, alpha_t = torch.exp(log_alpha_s1), torch.exp(log_alpha_t)
+        alpha_s1, alpha_t = paddle.exp(log_alpha_s1), paddle.exp(log_alpha_t)
 
         if self.predict_x0:
-            phi_11 = torch.expm1(-r1 * h)
-            phi_1 = torch.expm1(-h)
+            phi_11 = paddle.expm1(-r1 * h)
+            phi_1 = paddle.expm1(-h)
 
             if model_s is None:
                 model_s = self.model_fn(x, s)
@@ -565,31 +565,31 @@ class DPM_Solver:
                 x_t = (
                         expand_dims(sigma_t / sigma_s, dims) * x
                         - expand_dims(alpha_t * phi_1, dims) * model_s
-                        + (1. / r1) * expand_dims(alpha_t * ((torch.exp(-h) - 1.) / h + 1.), dims) * (
+                        + (1. / r1) * expand_dims(alpha_t * ((paddle.exp(-h) - 1.) / h + 1.), dims) * (
                                     model_s1 - model_s)
                 )
         else:
-            phi_11 = torch.expm1(r1 * h)
-            phi_1 = torch.expm1(h)
+            phi_11 = paddle.expm1(r1 * h)
+            phi_1 = paddle.expm1(h)
 
             if model_s is None:
                 model_s = self.model_fn(x, s)
             x_s1 = (
-                    expand_dims(torch.exp(log_alpha_s1 - log_alpha_s), dims) * x
+                    expand_dims(paddle.exp(log_alpha_s1 - log_alpha_s), dims) * x
                     - expand_dims(sigma_s1 * phi_11, dims) * model_s
             )
             model_s1 = self.model_fn(x_s1, s1)
             if solver_type == 'dpm_solver':
                 x_t = (
-                        expand_dims(torch.exp(log_alpha_t - log_alpha_s), dims) * x
+                        expand_dims(paddle.exp(log_alpha_t - log_alpha_s), dims) * x
                         - expand_dims(sigma_t * phi_1, dims) * model_s
                         - (0.5 / r1) * expand_dims(sigma_t * phi_1, dims) * (model_s1 - model_s)
                 )
             elif solver_type == 'taylor':
                 x_t = (
-                        expand_dims(torch.exp(log_alpha_t - log_alpha_s), dims) * x
+                        expand_dims(paddle.exp(log_alpha_t - log_alpha_s), dims) * x
                         - expand_dims(sigma_t * phi_1, dims) * model_s
-                        - (1. / r1) * expand_dims(sigma_t * ((torch.exp(h) - 1.) / h - 1.), dims) * (model_s1 - model_s)
+                        - (1. / r1) * expand_dims(sigma_t * ((paddle.exp(h) - 1.) / h - 1.), dims) * (model_s1 - model_s)
                 )
         if return_intermediate:
             return x_t, {'model_s': model_s, 'model_s1': model_s1}
@@ -601,20 +601,20 @@ class DPM_Solver:
         """
         Singlestep solver DPM-Solver-3 from time `s` to time `t`.
         Args:
-            x: A pytorch tensor. The initial value at time `s`.
-            s: A pytorch tensor. The starting time, with the shape (x.shape[0],).
-            t: A pytorch tensor. The ending time, with the shape (x.shape[0],).
+            x: A pypaddle tensor. The initial value at time `s`.
+            s: A pypaddle tensor. The starting time, with the shape (x.shape[0],).
+            t: A pypaddle tensor. The ending time, with the shape (x.shape[0],).
             r1: A `float`. The hyperparameter of the third-order solver.
             r2: A `float`. The hyperparameter of the third-order solver.
-            model_s: A pytorch tensor. The model function evaluated at time `s`.
+            model_s: A pypaddle tensor. The model function evaluated at time `s`.
                 If `model_s` is None, we evaluate the model by `x` and `s`; otherwise we directly use it.
-            model_s1: A pytorch tensor. The model function evaluated at time `s1` (the intermediate time given by `r1`).
+            model_s1: A pypaddle tensor. The model function evaluated at time `s1` (the intermediate time given by `r1`).
                 If `model_s1` is None, we evaluate the model at `s1`; otherwise we directly use it.
             return_intermediate: A `bool`. If true, also return the model value at time `s`, `s1` and `s2` (the intermediate times).
             solver_type: either 'dpm_solver' or 'taylor'. The type for the high-order solvers.
                 The type slightly impacts the performance. We recommend to use 'dpm_solver' type.
         Returns:
-            x_t: A pytorch tensor. The approximated solution at time `t`.
+            x_t: A pypaddle tensor. The approximated solution at time `t`.
         """
         if solver_type not in ['dpm_solver', 'taylor']:
             raise ValueError("'solver_type' must be either 'dpm_solver' or 'taylor', got {}".format(solver_type))
@@ -623,7 +623,7 @@ class DPM_Solver:
         if r2 is None:
             r2 = 2. / 3.
         ns = self.noise_schedule
-        dims = x.dim()
+        dims = x.ndim
         lambda_s, lambda_t = ns.marginal_lambda(s), ns.marginal_lambda(t)
         h = lambda_t - lambda_s
         lambda_s1 = lambda_s + r1 * h
@@ -634,13 +634,13 @@ class DPM_Solver:
             s), ns.marginal_log_mean_coeff(s1), ns.marginal_log_mean_coeff(s2), ns.marginal_log_mean_coeff(t)
         sigma_s, sigma_s1, sigma_s2, sigma_t = ns.marginal_std(s), ns.marginal_std(s1), ns.marginal_std(
             s2), ns.marginal_std(t)
-        alpha_s1, alpha_s2, alpha_t = torch.exp(log_alpha_s1), torch.exp(log_alpha_s2), torch.exp(log_alpha_t)
+        alpha_s1, alpha_s2, alpha_t = paddle.exp(log_alpha_s1), paddle.exp(log_alpha_s2), paddle.exp(log_alpha_t)
 
         if self.predict_x0:
-            phi_11 = torch.expm1(-r1 * h)
-            phi_12 = torch.expm1(-r2 * h)
-            phi_1 = torch.expm1(-h)
-            phi_22 = torch.expm1(-r2 * h) / (r2 * h) + 1.
+            phi_11 = paddle.expm1(-r1 * h)
+            phi_12 = paddle.expm1(-r2 * h)
+            phi_1 = paddle.expm1(-h)
+            phi_22 = paddle.expm1(-r2 * h) / (r2 * h) + 1.
             phi_2 = phi_1 / h + 1.
             phi_3 = phi_2 / h - 0.5
 
@@ -676,10 +676,10 @@ class DPM_Solver:
                         - expand_dims(alpha_t * phi_3, dims) * D2
                 )
         else:
-            phi_11 = torch.expm1(r1 * h)
-            phi_12 = torch.expm1(r2 * h)
-            phi_1 = torch.expm1(h)
-            phi_22 = torch.expm1(r2 * h) / (r2 * h) - 1.
+            phi_11 = paddle.expm1(r1 * h)
+            phi_12 = paddle.expm1(r2 * h)
+            phi_1 = paddle.expm1(h)
+            phi_22 = paddle.expm1(r2 * h) / (r2 * h) - 1.
             phi_2 = phi_1 / h - 1.
             phi_3 = phi_2 / h - 0.5
 
@@ -687,19 +687,19 @@ class DPM_Solver:
                 model_s = self.model_fn(x, s)
             if model_s1 is None:
                 x_s1 = (
-                        expand_dims(torch.exp(log_alpha_s1 - log_alpha_s), dims) * x
+                        expand_dims(paddle.exp(log_alpha_s1 - log_alpha_s), dims) * x
                         - expand_dims(sigma_s1 * phi_11, dims) * model_s
                 )
                 model_s1 = self.model_fn(x_s1, s1)
             x_s2 = (
-                    expand_dims(torch.exp(log_alpha_s2 - log_alpha_s), dims) * x
+                    expand_dims(paddle.exp(log_alpha_s2 - log_alpha_s), dims) * x
                     - expand_dims(sigma_s2 * phi_12, dims) * model_s
                     - r2 / r1 * expand_dims(sigma_s2 * phi_22, dims) * (model_s1 - model_s)
             )
             model_s2 = self.model_fn(x_s2, s2)
             if solver_type == 'dpm_solver':
                 x_t = (
-                        expand_dims(torch.exp(log_alpha_t - log_alpha_s), dims) * x
+                        expand_dims(paddle.exp(log_alpha_t - log_alpha_s), dims) * x
                         - expand_dims(sigma_t * phi_1, dims) * model_s
                         - (1. / r2) * expand_dims(sigma_t * phi_2, dims) * (model_s2 - model_s)
                 )
@@ -709,7 +709,7 @@ class DPM_Solver:
                 D1 = (r2 * D1_0 - r1 * D1_1) / (r2 - r1)
                 D2 = 2. * (D1_1 - D1_0) / (r2 - r1)
                 x_t = (
-                        expand_dims(torch.exp(log_alpha_t - log_alpha_s), dims) * x
+                        expand_dims(paddle.exp(log_alpha_t - log_alpha_s), dims) * x
                         - expand_dims(sigma_t * phi_1, dims) * model_s
                         - expand_dims(sigma_t * phi_2, dims) * D1
                         - expand_dims(sigma_t * phi_3, dims) * D2
@@ -724,26 +724,26 @@ class DPM_Solver:
         """
         Multistep solver DPM-Solver-2 from time `t_prev_list[-1]` to time `t`.
         Args:
-            x: A pytorch tensor. The initial value at time `s`.
-            model_prev_list: A list of pytorch tensor. The previous computed model values.
-            t_prev_list: A list of pytorch tensor. The previous times, each time has the shape (x.shape[0],)
-            t: A pytorch tensor. The ending time, with the shape (x.shape[0],).
+            x: A pypaddle tensor. The initial value at time `s`.
+            model_prev_list: A list of pypaddle tensor. The previous computed model values.
+            t_prev_list: A list of pypaddle tensor. The previous times, each time has the shape (x.shape[0],)
+            t: A pypaddle tensor. The ending time, with the shape (x.shape[0],).
             solver_type: either 'dpm_solver' or 'taylor'. The type for the high-order solvers.
                 The type slightly impacts the performance. We recommend to use 'dpm_solver' type.
         Returns:
-            x_t: A pytorch tensor. The approximated solution at time `t`.
+            x_t: A pypaddle tensor. The approximated solution at time `t`.
         """
         if solver_type not in ['dpm_solver', 'taylor']:
             raise ValueError("'solver_type' must be either 'dpm_solver' or 'taylor', got {}".format(solver_type))
         ns = self.noise_schedule
-        dims = x.dim()
+        dims = x.ndim
         model_prev_1, model_prev_0 = model_prev_list
         t_prev_1, t_prev_0 = t_prev_list
         lambda_prev_1, lambda_prev_0, lambda_t = ns.marginal_lambda(t_prev_1), ns.marginal_lambda(
             t_prev_0), ns.marginal_lambda(t)
         log_alpha_prev_0, log_alpha_t = ns.marginal_log_mean_coeff(t_prev_0), ns.marginal_log_mean_coeff(t)
         sigma_prev_0, sigma_t = ns.marginal_std(t_prev_0), ns.marginal_std(t)
-        alpha_t = torch.exp(log_alpha_t)
+        alpha_t = paddle.exp(log_alpha_t)
 
         h_0 = lambda_prev_0 - lambda_prev_1
         h = lambda_t - lambda_prev_0
@@ -753,27 +753,27 @@ class DPM_Solver:
             if solver_type == 'dpm_solver':
                 x_t = (
                         expand_dims(sigma_t / sigma_prev_0, dims) * x
-                        - expand_dims(alpha_t * (torch.exp(-h) - 1.), dims) * model_prev_0
-                        - 0.5 * expand_dims(alpha_t * (torch.exp(-h) - 1.), dims) * D1_0
+                        - expand_dims(alpha_t * (paddle.exp(-h) - 1.), dims) * model_prev_0
+                        - 0.5 * expand_dims(alpha_t * (paddle.exp(-h) - 1.), dims) * D1_0
                 )
             elif solver_type == 'taylor':
                 x_t = (
                         expand_dims(sigma_t / sigma_prev_0, dims) * x
-                        - expand_dims(alpha_t * (torch.exp(-h) - 1.), dims) * model_prev_0
-                        + expand_dims(alpha_t * ((torch.exp(-h) - 1.) / h + 1.), dims) * D1_0
+                        - expand_dims(alpha_t * (paddle.exp(-h) - 1.), dims) * model_prev_0
+                        + expand_dims(alpha_t * ((paddle.exp(-h) - 1.) / h + 1.), dims) * D1_0
                 )
         else:
             if solver_type == 'dpm_solver':
                 x_t = (
-                        expand_dims(torch.exp(log_alpha_t - log_alpha_prev_0), dims) * x
-                        - expand_dims(sigma_t * (torch.exp(h) - 1.), dims) * model_prev_0
-                        - 0.5 * expand_dims(sigma_t * (torch.exp(h) - 1.), dims) * D1_0
+                        expand_dims(paddle.exp(log_alpha_t - log_alpha_prev_0), dims) * x
+                        - expand_dims(sigma_t * (paddle.exp(h) - 1.), dims) * model_prev_0
+                        - 0.5 * expand_dims(sigma_t * (paddle.exp(h) - 1.), dims) * D1_0
                 )
             elif solver_type == 'taylor':
                 x_t = (
-                        expand_dims(torch.exp(log_alpha_t - log_alpha_prev_0), dims) * x
-                        - expand_dims(sigma_t * (torch.exp(h) - 1.), dims) * model_prev_0
-                        - expand_dims(sigma_t * ((torch.exp(h) - 1.) / h - 1.), dims) * D1_0
+                        expand_dims(paddle.exp(log_alpha_t - log_alpha_prev_0), dims) * x
+                        - expand_dims(sigma_t * (paddle.exp(h) - 1.), dims) * model_prev_0
+                        - expand_dims(sigma_t * ((paddle.exp(h) - 1.) / h - 1.), dims) * D1_0
                 )
         return x_t
 
@@ -781,24 +781,24 @@ class DPM_Solver:
         """
         Multistep solver DPM-Solver-3 from time `t_prev_list[-1]` to time `t`.
         Args:
-            x: A pytorch tensor. The initial value at time `s`.
-            model_prev_list: A list of pytorch tensor. The previous computed model values.
-            t_prev_list: A list of pytorch tensor. The previous times, each time has the shape (x.shape[0],)
-            t: A pytorch tensor. The ending time, with the shape (x.shape[0],).
+            x: A pypaddle tensor. The initial value at time `s`.
+            model_prev_list: A list of pypaddle tensor. The previous computed model values.
+            t_prev_list: A list of pypaddle tensor. The previous times, each time has the shape (x.shape[0],)
+            t: A pypaddle tensor. The ending time, with the shape (x.shape[0],).
             solver_type: either 'dpm_solver' or 'taylor'. The type for the high-order solvers.
                 The type slightly impacts the performance. We recommend to use 'dpm_solver' type.
         Returns:
-            x_t: A pytorch tensor. The approximated solution at time `t`.
+            x_t: A pypaddle tensor. The approximated solution at time `t`.
         """
         ns = self.noise_schedule
-        dims = x.dim()
+        dims = x.ndim
         model_prev_2, model_prev_1, model_prev_0 = model_prev_list
         t_prev_2, t_prev_1, t_prev_0 = t_prev_list
         lambda_prev_2, lambda_prev_1, lambda_prev_0, lambda_t = ns.marginal_lambda(t_prev_2), ns.marginal_lambda(
             t_prev_1), ns.marginal_lambda(t_prev_0), ns.marginal_lambda(t)
         log_alpha_prev_0, log_alpha_t = ns.marginal_log_mean_coeff(t_prev_0), ns.marginal_log_mean_coeff(t)
         sigma_prev_0, sigma_t = ns.marginal_std(t_prev_0), ns.marginal_std(t)
-        alpha_t = torch.exp(log_alpha_t)
+        alpha_t = paddle.exp(log_alpha_t)
 
         h_1 = lambda_prev_1 - lambda_prev_2
         h_0 = lambda_prev_0 - lambda_prev_1
@@ -811,16 +811,16 @@ class DPM_Solver:
         if self.predict_x0:
             x_t = (
                     expand_dims(sigma_t / sigma_prev_0, dims) * x
-                    - expand_dims(alpha_t * (torch.exp(-h) - 1.), dims) * model_prev_0
-                    + expand_dims(alpha_t * ((torch.exp(-h) - 1.) / h + 1.), dims) * D1
-                    - expand_dims(alpha_t * ((torch.exp(-h) - 1. + h) / h ** 2 - 0.5), dims) * D2
+                    - expand_dims(alpha_t * (paddle.exp(-h) - 1.), dims) * model_prev_0
+                    + expand_dims(alpha_t * ((paddle.exp(-h) - 1.) / h + 1.), dims) * D1
+                    - expand_dims(alpha_t * ((paddle.exp(-h) - 1. + h) / h ** 2 - 0.5), dims) * D2
             )
         else:
             x_t = (
-                    expand_dims(torch.exp(log_alpha_t - log_alpha_prev_0), dims) * x
-                    - expand_dims(sigma_t * (torch.exp(h) - 1.), dims) * model_prev_0
-                    - expand_dims(sigma_t * ((torch.exp(h) - 1.) / h - 1.), dims) * D1
-                    - expand_dims(sigma_t * ((torch.exp(h) - 1. - h) / h ** 2 - 0.5), dims) * D2
+                    expand_dims(paddle.exp(log_alpha_t - log_alpha_prev_0), dims) * x
+                    - expand_dims(sigma_t * (paddle.exp(h) - 1.), dims) * model_prev_0
+                    - expand_dims(sigma_t * ((paddle.exp(h) - 1.) / h - 1.), dims) * D1
+                    - expand_dims(sigma_t * ((paddle.exp(h) - 1. - h) / h ** 2 - 0.5), dims) * D2
             )
         return x_t
 
@@ -829,9 +829,9 @@ class DPM_Solver:
         """
         Singlestep DPM-Solver with the order `order` from time `s` to time `t`.
         Args:
-            x: A pytorch tensor. The initial value at time `s`.
-            s: A pytorch tensor. The starting time, with the shape (x.shape[0],).
-            t: A pytorch tensor. The ending time, with the shape (x.shape[0],).
+            x: A pypaddle tensor. The initial value at time `s`.
+            s: A pypaddle tensor. The starting time, with the shape (x.shape[0],).
+            t: A pypaddle tensor. The ending time, with the shape (x.shape[0],).
             order: A `int`. The order of DPM-Solver. We only support order == 1 or 2 or 3.
             return_intermediate: A `bool`. If true, also return the model value at time `s`, `s1` and `s2` (the intermediate times).
             solver_type: either 'dpm_solver' or 'taylor'. The type for the high-order solvers.
@@ -839,7 +839,7 @@ class DPM_Solver:
             r1: A `float`. The hyperparameter of the second-order or third-order solver.
             r2: A `float`. The hyperparameter of the third-order solver.
         Returns:
-            x_t: A pytorch tensor. The approximated solution at time `t`.
+            x_t: A pypaddle tensor. The approximated solution at time `t`.
         """
         if order == 1:
             return self.dpm_solver_first_update(x, s, t, return_intermediate=return_intermediate)
@@ -856,15 +856,15 @@ class DPM_Solver:
         """
         Multistep DPM-Solver with the order `order` from time `t_prev_list[-1]` to time `t`.
         Args:
-            x: A pytorch tensor. The initial value at time `s`.
-            model_prev_list: A list of pytorch tensor. The previous computed model values.
-            t_prev_list: A list of pytorch tensor. The previous times, each time has the shape (x.shape[0],)
-            t: A pytorch tensor. The ending time, with the shape (x.shape[0],).
+            x: A pypaddle tensor. The initial value at time `s`.
+            model_prev_list: A list of pypaddle tensor. The previous computed model values.
+            t_prev_list: A list of pypaddle tensor. The previous times, each time has the shape (x.shape[0],)
+            t: A pypaddle tensor. The ending time, with the shape (x.shape[0],).
             order: A `int`. The order of DPM-Solver. We only support order == 1 or 2 or 3.
             solver_type: either 'dpm_solver' or 'taylor'. The type for the high-order solvers.
                 The type slightly impacts the performance. We recommend to use 'dpm_solver' type.
         Returns:
-            x_t: A pytorch tensor. The approximated solution at time `t`.
+            x_t: A pypaddle tensor. The approximated solution at time `t`.
         """
         if order == 1:
             return self.dpm_solver_first_update(x, t_prev_list[-1], t, model_s=model_prev_list[-1])
@@ -880,7 +880,7 @@ class DPM_Solver:
         """
         The adaptive step size solver based on singlestep DPM-Solver.
         Args:
-            x: A pytorch tensor. The initial value at time `t_T`.
+            x: A pypaddle tensor. The initial value at time `t_T`.
             order: A `int`. The (higher) order of the solver. We only support order == 2 or 3.
             t_T: A `float`. The starting time of the sampling (default is T).
             t_0: A `float`. The ending time of the sampling (default is epsilon).
@@ -893,14 +893,14 @@ class DPM_Solver:
             solver_type: either 'dpm_solver' or 'taylor'. The type for the high-order solvers.
                 The type slightly impacts the performance. We recommend to use 'dpm_solver' type.
         Returns:
-            x_0: A pytorch tensor. The approximated solution at time `t_0`.
+            x_0: A pypaddle tensor. The approximated solution at time `t_0`.
         [1] A. Jolicoeur-Martineau, K. Li, R. Piché-Taillefer, T. Kachman, and I. Mitliagkas, "Gotta go fast when generating data with score-based models," arXiv preprint arXiv:2105.14080, 2021.
         """
         ns = self.noise_schedule
-        s = t_T * torch.ones((x.shape[0],)).to(x)
+        s = t_T * paddle.ones((x.shape[0],)).to(x)
         lambda_s = ns.marginal_lambda(s)
-        lambda_0 = ns.marginal_lambda(t_0 * torch.ones_like(s).to(x))
-        h = h_init * torch.ones_like(s).to(x)
+        lambda_0 = ns.marginal_lambda(t_0 * paddle.ones_like(s).to(x))
+        h = h_init * paddle.ones_like(s).to(x)
         x_prev = x
         nfe = 0
         if order == 2:
@@ -919,19 +919,19 @@ class DPM_Solver:
                                                                                               **kwargs)
         else:
             raise ValueError("For adaptive step size solver, order must be 2 or 3, got {}".format(order))
-        while torch.abs((s - t_0)).mean() > t_err:
+        while paddle.abs((s - t_0)).mean() > t_err:
             t = ns.inverse_lambda(lambda_s + h)
             x_lower, lower_noise_kwargs = lower_update(x, s, t)
             x_higher = higher_update(x, s, t, **lower_noise_kwargs)
-            delta = torch.max(torch.ones_like(x).to(x) * atol, rtol * torch.max(torch.abs(x_lower), torch.abs(x_prev)))
-            norm_fn = lambda v: torch.sqrt(torch.square(v.reshape((v.shape[0], -1))).mean(dim=-1, keepdim=True))
+            delta = paddle.max(paddle.ones_like(x).to(x) * atol, rtol * paddle.max(paddle.abs(x_lower), paddle.abs(x_prev)))
+            norm_fn = lambda v: paddle.sqrt(paddle.square(v.reshape((v.shape[0], -1))).mean(-1, keepdim=True))
             E = norm_fn((x_higher - x_lower) / delta).max()
-            if torch.all(E <= 1.):
+            if paddle.all(E <= 1.):
                 x = x_higher
                 s = t
                 x_prev = x_lower
                 lambda_s = ns.marginal_lambda(s)
-            h = torch.min(theta * h * torch.float_power(E, -1. / order).float(), lambda_0 - lambda_s)
+            h = paddle.min(theta * h * paddle.float_power(E, -1. / order).float(), lambda_0 - lambda_s)
             nfe += order
         print('adaptive solver nfe', nfe)
         return x
@@ -1001,7 +1001,7 @@ class DPM_Solver:
             - 'time_quadratic': quadratic time for the time steps.
         =====================================================
         Args:
-            x: A pytorch tensor. The initial value at time `t_start`
+            x: A pypaddle tensor. The initial value at time `t_start`
                 e.g. if `t_start` == T, then `x` is a sample from the standard normal distribution.
             steps: A `int`. The total number of function evaluations (NFE).
             t_start: A `float`. The starting time of the sampling.
@@ -1032,20 +1032,20 @@ class DPM_Solver:
             atol: A `float`. The absolute tolerance of the adaptive step size solver. Valid when `method` == 'adaptive'.
             rtol: A `float`. The relative tolerance of the adaptive step size solver. Valid when `method` == 'adaptive'.
         Returns:
-            x_end: A pytorch tensor. The approximated solution at time `t_end`.
+            x_end: A pypaddle tensor. The approximated solution at time `t_end`.
         """
         t_0 = 1. / self.noise_schedule.total_N if t_end is None else t_end
         t_T = self.noise_schedule.T if t_start is None else t_start
         device = x.device
         if method == 'adaptive':
-            with torch.no_grad():
+            with paddle.no_grad():
                 x = self.dpm_solver_adaptive(x, order=order, t_T=t_T, t_0=t_0, atol=atol, rtol=rtol,
                                              solver_type=solver_type)
         elif method == 'multistep':
             assert steps >= order
             timesteps = self.get_time_steps(skip_type=skip_type, t_T=t_T, t_0=t_0, N=steps, device=device)
             assert timesteps.shape[0] - 1 == steps
-            with torch.no_grad():
+            with paddle.no_grad():
                 vec_t = timesteps[0].expand((x.shape[0]))
                 model_prev_list = [self.model_fn(x, vec_t)]
                 t_prev_list = [vec_t]
@@ -1093,7 +1093,7 @@ class DPM_Solver:
                 r2 = None if order <= 2 else (lambda_inner[2] - lambda_inner[0]) / h
                 x = self.singlestep_dpm_solver_update(x, vec_s, vec_t, order, solver_type=solver_type, r1=r1, r2=r2)
         if denoise_to_zero:
-            x = self.denoise_to_zero_fn(x, torch.ones((x.shape[0],)).to(device) * t_0)
+            x = self.denoise_to_zero_fn(x, paddle.ones((x.shape[0],)).to(device) * t_0)
         return x
 
 
@@ -1107,37 +1107,37 @@ def interpolate_fn(x, xp, yp):
     We implement f(x) in a differentiable way (i.e. applicable for autograd).
     The function f(x) is well-defined for all x-axis. (For x beyond the bounds of xp, we use the outmost points of xp to define the linear function.)
     Args:
-        x: PyTorch tensor with shape [N, C], where N is the batch size, C is the number of channels (we use C = 1 for DPM-Solver).
-        xp: PyTorch tensor with shape [C, K], where K is the number of keypoints.
-        yp: PyTorch tensor with shape [C, K].
+        x: Pypaddle tensor with shape [N, C], where N is the batch size, C is the number of channels (we use C = 1 for DPM-Solver).
+        xp: Pypaddle tensor with shape [C, K], where K is the number of keypoints.
+        yp: Pypaddle tensor with shape [C, K].
     Returns:
         The function values f(x), with shape [N, C].
     """
     N, K = x.shape[0], xp.shape[1]
-    all_x = torch.cat([x.unsqueeze(2), xp.unsqueeze(0).repeat((N, 1, 1))], dim=2)
-    sorted_all_x, x_indices = torch.sort(all_x, dim=2)
-    x_idx = torch.argmin(x_indices, dim=2)
+    all_x = paddle.cat([x.unsqueeze(2), xp.unsqueeze(0).repeat((N, 1, 1))], dim=2)
+    sorted_all_x, x_indices = paddle.topk(all_x, k=all_x.shape[2], axis=2, largest=False)
+    x_idx = paddle.argmin(x_indices, axis=2)
     cand_start_idx = x_idx - 1
-    start_idx = torch.where(
-        torch.eq(x_idx, 0),
-        torch.tensor(1, device=x.device),
-        torch.where(
-            torch.eq(x_idx, K), torch.tensor(K - 2, device=x.device), cand_start_idx,
+    start_idx = paddle.where(
+        paddle.eq(x_idx, 0),
+        paddle.to_tensor(1, place=x.device),
+        paddle.where(
+            paddle.eq(x_idx, K), paddle.to_tensor(K - 2, place=x.device), cand_start_idx,
         ),
     )
-    end_idx = torch.where(torch.eq(start_idx, cand_start_idx), start_idx + 2, start_idx + 1)
-    start_x = torch.gather(sorted_all_x, dim=2, index=start_idx.unsqueeze(2)).squeeze(2)
-    end_x = torch.gather(sorted_all_x, dim=2, index=end_idx.unsqueeze(2)).squeeze(2)
-    start_idx2 = torch.where(
-        torch.eq(x_idx, 0),
-        torch.tensor(0, device=x.device),
-        torch.where(
-            torch.eq(x_idx, K), torch.tensor(K - 2, device=x.device), cand_start_idx,
+    end_idx = paddle.where(paddle.eq(start_idx, cand_start_idx), start_idx + 2, start_idx + 1)
+    start_x = paddle.gather_torch(sorted_all_x, dim=2, index=start_idx.unsqueeze(2)).squeeze(2)
+    end_x = paddle.gather_torch(sorted_all_x, dim=2, index=end_idx.unsqueeze(2)).squeeze(2)
+    start_idx2 = paddle.where(
+        paddle.eq(x_idx, 0),
+        paddle.to_tensor(0, place=x.device),
+        paddle.where(
+            paddle.eq(x_idx, K), paddle.to_tensor(K - 2, place=x.device), cand_start_idx,
         ),
     )
     y_positions_expanded = yp.unsqueeze(0).expand(N, -1, -1)
-    start_y = torch.gather(y_positions_expanded, dim=2, index=start_idx2.unsqueeze(2)).squeeze(2)
-    end_y = torch.gather(y_positions_expanded, dim=2, index=(start_idx2 + 1).unsqueeze(2)).squeeze(2)
+    start_y = paddle.gather_torch(y_positions_expanded, dim=2, index=start_idx2.unsqueeze(2)).squeeze(2)
+    end_y = paddle.gather_torch(y_positions_expanded, dim=2, index=(start_idx2 + 1).unsqueeze(2)).squeeze(2)
     cand = start_y + (x - start_x) * (end_y - start_y) / (end_x - start_x)
     return cand
 
@@ -1146,9 +1146,9 @@ def expand_dims(v, dims):
     """
     Expand the tensor `v` to the dim `dims`.
     Args:
-        `v`: a PyTorch tensor with shape [N].
+        `v`: a Pypaddle tensor with shape [N].
         `dim`: a `int`.
     Returns:
-        a PyTorch tensor with shape [N, 1, 1, ..., 1] and the total dimension is `dims`.
+        a Pypaddle tensor with shape [N, 1, 1, ..., 1] and the total dimension is `dims`.
     """
     return v[(...,) + (None,) * (dims - 1)]

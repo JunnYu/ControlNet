@@ -13,7 +13,7 @@ assert os.path.exists(path_input), 'Input path_input does not exists!'
 assert os.path.exists(os.path.dirname(path_output)), 'Output folder not exists!'
 
 
-import torch
+import paddle
 from share import *
 from cldm.model import load_state_dict
 
@@ -55,5 +55,5 @@ for key in keys:
         # print(f'Direct clone to [{key}]')
     final_state_dict[key] = p_new
 
-torch.save(final_state_dict, path_output)
+paddle.save(final_state_dict, path_output)
 print('Transferred model saved at ' + path_output)

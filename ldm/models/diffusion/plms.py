@@ -1,6 +1,6 @@
 """SAMPLING ONLY."""
 
-import torch
+import paddle
 import numpy as np
 from tqdm import tqdm
 from functools import partial
@@ -17,9 +17,6 @@ class PLMSSampler(object):
         self.schedule = schedule
 
     def register_buffer(self, name, attr):
-        if type(attr) == torch.Tensor:
-            if attr.device != torch.device("cuda"):
-                attr = attr.to(torch.device("cuda"))
         setattr(self, name, attr)
 
     def make_schedule(self, ddim_num_steps, ddim_discretize="uniform", ddim_eta=0., verbose=True):
@@ -29,33 +26,34 @@ class PLMSSampler(object):
                                                   num_ddpm_timesteps=self.ddpm_num_timesteps,verbose=verbose)
         alphas_cumprod = self.model.alphas_cumprod
         assert alphas_cumprod.shape[0] == self.ddpm_num_timesteps, 'alphas have to be defined for each timestep'
-        to_torch = lambda x: x.clone().detach().to(torch.float32).to(self.model.device)
+        to_paddle = lambda x: paddle.to_tensor(x).clone().detach().to(paddle.float32).to(self.model.device)
 
-        self.register_buffer('betas', to_torch(self.model.betas))
-        self.register_buffer('alphas_cumprod', to_torch(alphas_cumprod))
-        self.register_buffer('alphas_cumprod_prev', to_torch(self.model.alphas_cumprod_prev))
+        self.register_buffer('betas', to_paddle(self.model.betas))
+        self.register_buffer('alphas_cumprod', to_paddle(alphas_cumprod))
+        self.register_buffer('alphas_cumprod_prev', to_paddle(self.model.alphas_cumprod_prev))
 
+        numpy_alphas_cumprod = alphas_cumprod.cpu().numpy()
         # calculations for diffusion q(x_t | x_{t-1}) and others
-        self.register_buffer('sqrt_alphas_cumprod', to_torch(np.sqrt(alphas_cumprod.cpu())))
-        self.register_buffer('sqrt_one_minus_alphas_cumprod', to_torch(np.sqrt(1. - alphas_cumprod.cpu())))
-        self.register_buffer('log_one_minus_alphas_cumprod', to_torch(np.log(1. - alphas_cumprod.cpu())))
-        self.register_buffer('sqrt_recip_alphas_cumprod', to_torch(np.sqrt(1. / alphas_cumprod.cpu())))
-        self.register_buffer('sqrt_recipm1_alphas_cumprod', to_torch(np.sqrt(1. / alphas_cumprod.cpu() - 1)))
+        self.register_buffer('sqrt_alphas_cumprod', to_paddle(np.sqrt(numpy_alphas_cumprod)))
+        self.register_buffer('sqrt_one_minus_alphas_cumprod', to_paddle(np.sqrt(1. - numpy_alphas_cumprod)))
+        self.register_buffer('log_one_minus_alphas_cumprod', to_paddle(np.log(1. - numpy_alphas_cumprod)))
+        self.register_buffer('sqrt_recip_alphas_cumprod', to_paddle(np.sqrt(1. / numpy_alphas_cumprod)))
+        self.register_buffer('sqrt_recipm1_alphas_cumprod', to_paddle(np.sqrt(1. / numpy_alphas_cumprod - 1)))
 
         # ddim sampling parameters
-        ddim_sigmas, ddim_alphas, ddim_alphas_prev = make_ddim_sampling_parameters(alphacums=alphas_cumprod.cpu(),
+        ddim_sigmas, ddim_alphas, ddim_alphas_prev = make_ddim_sampling_parameters(alphacums=numpy_alphas_cumprod,
                                                                                    ddim_timesteps=self.ddim_timesteps,
                                                                                    eta=ddim_eta,verbose=verbose)
         self.register_buffer('ddim_sigmas', ddim_sigmas)
         self.register_buffer('ddim_alphas', ddim_alphas)
         self.register_buffer('ddim_alphas_prev', ddim_alphas_prev)
         self.register_buffer('ddim_sqrt_one_minus_alphas', np.sqrt(1. - ddim_alphas))
-        sigmas_for_original_sampling_steps = ddim_eta * torch.sqrt(
+        sigmas_for_original_sampling_steps = ddim_eta * paddle.sqrt(
             (1 - self.alphas_cumprod_prev) / (1 - self.alphas_cumprod) * (
                         1 - self.alphas_cumprod / self.alphas_cumprod_prev))
         self.register_buffer('ddim_sigmas_for_original_num_steps', sigmas_for_original_sampling_steps)
 
-    @torch.no_grad()
+    @paddle.no_grad()
     def sample(self,
                S,
                batch_size,
@@ -114,7 +112,7 @@ class PLMSSampler(object):
                                                     )
         return samples, intermediates
 
-    @torch.no_grad()
+    @paddle.no_grad()
     def plms_sampling(self, cond, shape,
                       x_T=None, ddim_use_original_steps=False,
                       callback=None, timesteps=None, quantize_denoised=False,
@@ -125,7 +123,7 @@ class PLMSSampler(object):
         device = self.model.betas.device
         b = shape[0]
         if x_T is None:
-            img = torch.randn(shape, device=device)
+            img = paddle.randn(shape, device=device)
         else:
             img = x_T
 
@@ -145,8 +143,8 @@ class PLMSSampler(object):
 
         for i, step in enumerate(iterator):
             index = total_steps - i - 1
-            ts = torch.full((b,), step, device=device, dtype=torch.long)
-            ts_next = torch.full((b,), time_range[min(i + 1, len(time_range) - 1)], device=device, dtype=torch.long)
+            ts = paddle.full((b,), step, device=device, dtype=paddle.long)
+            ts_next = paddle.full((b,), time_range[min(i + 1, len(time_range) - 1)], device=device, dtype=paddle.long)
 
             if mask is not None:
                 assert x0 is not None
@@ -174,7 +172,7 @@ class PLMSSampler(object):
 
         return img, intermediates
 
-    @torch.no_grad()
+    @paddle.no_grad()
     def p_sample_plms(self, x, c, t, index, repeat_noise=False, use_original_steps=False, quantize_denoised=False,
                       temperature=1., noise_dropout=0., score_corrector=None, corrector_kwargs=None,
                       unconditional_guidance_scale=1., unconditional_conditioning=None, old_eps=None, t_next=None,
@@ -185,9 +183,9 @@ class PLMSSampler(object):
             if unconditional_conditioning is None or unconditional_guidance_scale == 1.:
                 e_t = self.model.apply_model(x, t, c)
             else:
-                x_in = torch.cat([x] * 2)
-                t_in = torch.cat([t] * 2)
-                c_in = torch.cat([unconditional_conditioning, c])
+                x_in = paddle.cat([x] * 2)
+                t_in = paddle.cat([t] * 2)
+                c_in = paddle.cat([unconditional_conditioning, c])
                 e_t_uncond, e_t = self.model.apply_model(x_in, t_in, c_in).chunk(2)
                 e_t = e_t_uncond + unconditional_guidance_scale * (e_t - e_t_uncond)
 
@@ -204,10 +202,10 @@ class PLMSSampler(object):
 
         def get_x_prev_and_pred_x0(e_t, index):
             # select parameters corresponding to the currently considered timestep
-            a_t = torch.full((b, 1, 1, 1), alphas[index], device=device)
-            a_prev = torch.full((b, 1, 1, 1), alphas_prev[index], device=device)
-            sigma_t = torch.full((b, 1, 1, 1), sigmas[index], device=device)
-            sqrt_one_minus_at = torch.full((b, 1, 1, 1), sqrt_one_minus_alphas[index],device=device)
+            a_t = paddle.full((b, 1, 1, 1), alphas[index], device=device)
+            a_prev = paddle.full((b, 1, 1, 1), alphas_prev[index], device=device)
+            sigma_t = paddle.full((b, 1, 1, 1), sigmas[index], device=device)
+            sqrt_one_minus_at = paddle.full((b, 1, 1, 1), sqrt_one_minus_alphas[index],device=device)
 
             # current prediction for x_0
             pred_x0 = (x - sqrt_one_minus_at * e_t) / a_t.sqrt()
@@ -219,7 +217,7 @@ class PLMSSampler(object):
             dir_xt = (1. - a_prev - sigma_t**2).sqrt() * e_t
             noise = sigma_t * noise_like(x.shape, device, repeat_noise) * temperature
             if noise_dropout > 0.:
-                noise = torch.nn.functional.dropout(noise, p=noise_dropout)
+                noise = paddle.nn.functional.dropout(noise, p=noise_dropout)
             x_prev = a_prev.sqrt() * pred_x0 + dir_xt + noise
             return x_prev, pred_x0
 

@@ -1,5 +1,5 @@
 """SAMPLING ONLY."""
-import torch
+import paddle
 
 from .dpm_solver import NoiseScheduleVP, model_wrapper, DPM_Solver
 
@@ -11,19 +11,20 @@ MODEL_TYPES = {
 
 
 class DPMSolverSampler(object):
-    def __init__(self, model, **kwargs):
+    def __init__(self, model, device="gpu", **kwargs):
         super().__init__()
         self.model = model
-        to_torch = lambda x: x.clone().detach().to(torch.float32).to(model.device)
-        self.register_buffer('alphas_cumprod', to_torch(model.alphas_cumprod))
+        self.device = device
+        to_paddle = lambda x: x.clone().detach().to(paddle.float32).to(model.device)
+        self.register_buffer('alphas_cumprod', to_paddle(model.alphas_cumprod))
 
     def register_buffer(self, name, attr):
-        if type(attr) == torch.Tensor:
-            if attr.device != torch.device("cuda"):
-                attr = attr.to(torch.device("cuda"))
+        if type(attr) == paddle.Tensor:
+            if attr.device != self.device:
+                attr = attr.to(self.device)
         setattr(self, name, attr)
 
-    @torch.no_grad()
+    @paddle.no_grad()
     def sample(self,
                S,
                batch_size,
@@ -65,7 +66,7 @@ class DPMSolverSampler(object):
 
         device = self.model.betas.device
         if x_T is None:
-            img = torch.randn(size, device=device)
+            img = paddle.randn(size, device=device)
         else:
             img = x_T
 
